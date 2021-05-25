@@ -16,3 +16,6 @@
 [submodule "libs/framework_vulkan"]
 	path = libs/framework_vulkan
 	url = https://github.com/Ihaa21/framework_vulkan.git
+[submodule "libs/profiling"]
+	path = libs/profiling
+	url = https://github.com/Ihaa21/profiling.git

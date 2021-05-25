@@ -4,6 +4,49 @@
 
 #include "framework_vulkan\framework_vulkan.h"
 
+#define CPU_PROFILING
+#define WIN32_PROFILING
+#define X86_PROFILING
+#include "profiling\profiling.h"
+
+//
+// NOTE: Sim handling
+//
+
+struct grid_range
+{
+    i32 StartX;
+    i32 StartY;
+    i32 EndX;
+    i32 EndY;
+};
+
+struct grid_cell
+{
+    u32 NumIndices;
+    block_arena IndexArena;
+};
+
+struct grid
+{
+    aabb2 WorldBounds;
+    u32 NumCellsX;
+    u32 NumCellsY;
+    u32 MaxNumIndicesPerBlock;
+    grid_cell* Cells;
+};
+
+struct bird
+{
+    // TODO: Handle multiple grid cells for one entity
+    v2 Position;
+    v2 Velocity;
+};
+
+//
+// NOTE: Render Data
+//
+
 struct directional_light
 {
     v3 Color;
@@ -85,6 +128,7 @@ struct render_scene
 
 struct demo_state
 {
+    platform_block_arena PlatformBlockArena;
     linear_arena Arena;
     linear_arena TempArena;
 
@@ -113,8 +157,7 @@ struct demo_state
     // NOTE: Boid Globals
     f32 MinSpeed;
     f32 MaxSpeed;
-    f32 MaxSteerSpeed;
-    f32 BoidRadiusSq;
+    f32 BirdRadiusSq;
     f32 AvoidRadiusSq;
     f32 TerrainAvoidRadius;
     f32 TerrainRadius;
@@ -124,10 +167,13 @@ struct demo_state
     f32 AlignFlockWeight;
     f32 MoveToFlockWeight;
     
-    // NOTE: Boid Data
-    u32 NumBoids;
-    v3* BoidPositions;
-    v3* BoidVelocities;    
+    // NOTE: Bird Data
+    v3 BirdRadius;
+    u32 NumBirds;
+    bird* CurrBirds;
+    bird* PrevBirds;
+
+    grid Grid;
 };
 
 global demo_state* DemoState;

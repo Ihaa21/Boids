@@ -8,7 +8,7 @@ set VulkanIncludeDir="C:\VulkanSDK\1.2.135.0\Include\vulkan"
 set VulkanBinDir="C:\VulkanSDK\1.2.135.0\Bin"
 set AssimpDir=%LibsDir%\framework_vulkan
 
-set CommonCompilerFlags=-Od -MTd -nologo -fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4127 -wd4201 -wd4100 -wd4189 -wd4505 -Z7 -FC
+set CommonCompilerFlags=-O2 -MTd -nologo -fp:fast -fp:except- -EHsc -Gm- -GR- -EHa- -Zo -Oi -WX -W4 -wd4127 -wd4201 -wd4100 -wd4189 -wd4505 -Z7 -FC
 set CommonCompilerFlags=-I %VulkanIncludeDir% %CommonCompilerFlags%
 set CommonCompilerFlags=-I %LibsDir% -I %AssimpDir% %CommonCompilerFlags%
 REM Check the DLLs here
