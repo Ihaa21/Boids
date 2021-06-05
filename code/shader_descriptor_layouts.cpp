@@ -17,6 +17,7 @@ struct instance_entry
 {
     mat4 WVTransform;
     mat4 WVPTransform;
+    vec4 Color;
 };
 
 #define SCENE_DESCRIPTOR_LAYOUT(set_number)                             \

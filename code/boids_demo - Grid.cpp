@@ -12,48 +12,6 @@
   
  */
 
-// NOTE: This will only help for larger avoid/boid radii
-#if 0
-            v2 CellDim = AabbGetDim(Grid->WorldBounds) / V2(Grid->NumCellsX, Grid->NumCellsY);
-            v2 CellMin = Grid->WorldBounds.Min + V2(GridX, GridY) * CellDim;
-            v2 CellMax = CellMin + CellDim;
-
-            v2 MaxCellDistanceVec = Max(Abs(CellMin - NewBirdPosition), Abs(CellMax - NewBirdPosition));
-            f32 MaxCellDistance = LengthSquared(MaxCellDistanceVec);
-
-            if (MaxCellDistance < DemoState->BirdRadiusSq && MaxCellDistance < DemoState->AvoidRadiusSq)
-            {
-                // NOTE: Fast path, we don't have to compute distances for each bird
-                u32 GlobalIndexId = 0;
-                for (block* CurrBlock = CurrCell->IndexArena.Next; CurrBlock; CurrBlock = CurrBlock->Next)
-                {
-                    u32* BlockIndices = BlockGetData(CurrBlock, u32);
-                    u32 NumIndicesInBlock = Min(CurrCell->NumIndices - GlobalIndexId, Grid->MaxNumIndicesPerBlock);
-                    for (u32 IndexId = 0; IndexId < NumIndicesInBlock; ++IndexId, ++GlobalIndexId)
-                    {
-                        u32 NearbyBirdId = BlockIndices[IndexId];
-                                    
-                        if (NearbyBirdId != CurrBirdId)
-                        {
-                            bird* NearbyBird = PrevBirdArray + NearbyBirdId;
-                            v2 DistanceVec = NearbyBird->Position - NewBirdPosition;
-
-                            // TODO: Add a proper FOV
-                            NumBirdsInRadius += 1;
-                                
-                            // NOTE: Velocity Matching
-                            AvgFlockDir += NearbyBird->Velocity;
-                            // NOTE: Bird Flocking
-                            AvgFlockPos += NearbyBird->Position;
-                            // NOTE: Avoidance
-                            AvgFlockAvoidance += -DistanceVec;
-                        }
-                    }
-                }
-            }
-            else
-#endif
-
 inline f32 RandFloat()
 {
     f32 Result = f32(rand()) / f32(RAND_MAX);
@@ -76,11 +34,10 @@ inline grid GridCreate(linear_arena* Arena, platform_block_arena* BlockArena, aa
     {
         grid_cell* CurrCell = Result.Cells + CellId;
         *CurrCell = {};
-        CurrCell->IndexArena = BlockArenaCreate(BlockArena, sizeof(v1u_x4));
+        CurrCell->IndexArena = BlockArenaCreate(BlockArena);
     }
     
-    Result.MaxNumIndicesPerBlock = u32(BlockArenaGetBlockSize(&Result.Cells[0].IndexArena) / sizeof(v1u_x4));
-    Result.MaxNumIndicesPerBlock *= 4;
+    Result.MaxNumIndicesPerBlock = u32(BlockArenaGetBlockSize(&Result.Cells[0].IndexArena) / sizeof(u32));
 
     return Result;
 }
@@ -105,37 +62,21 @@ inline u32 GridAddEntity(grid* Grid, v2 Position, u32 EntityId)
     return Result;
 }
 
-inline grid_range GridGetRange(grid* Grid, v2_x4 Pos, v1_x4 Radius, v1u_x4 IgnoreMask)
+inline grid_range GridGetRange(grid* Grid, v2 Pos, f32 Radius)
 {
     grid_range Result = {};
 
-    v2_x4 MinPos = Pos - V2X4(Radius, Radius);
-    v2_x4 MaxPos = Pos + V2X4(Radius, Radius);
+    v2 Min = Pos - V2(Radius);
+    v2 Max = Pos + V2(Radius);
 
-    v2_x4 ReMappedMin = (MinPos - Grid->WorldBounds.Min) / AabbGetDim(Grid->WorldBounds);
-    v2_x4 ReMappedMax = (MaxPos - Grid->WorldBounds.Min) / AabbGetDim(Grid->WorldBounds);
-
-    // TODO: Does the floor work correctly??
-    v1u_x4 StartX = Clamp(FloorV1UX4(ReMappedMin.x * f32(Grid->NumCellsX)), V1UX4(0), V1UX4(Grid->NumCellsX - 1));
-    v1u_x4 StartY = Clamp(FloorV1UX4(ReMappedMin.y * f32(Grid->NumCellsY)), V1UX4(0), V1UX4(Grid->NumCellsY - 1));
-    v1u_x4 EndX = Clamp(FloorV1UX4(ReMappedMax.x * f32(Grid->NumCellsX)), V1UX4(0), V1UX4(Grid->NumCellsX - 1));
-    v1u_x4 EndY = Clamp(FloorV1UX4(ReMappedMax.y * f32(Grid->NumCellsY)), V1UX4(0), V1UX4(Grid->NumCellsY - 1));
-
-    // NOTE: Apply ignore mask to not change output
-    v1u_x4 IgnoreMaskMin = ~IgnoreMask;
-    v1u_x4 IgnoreMaskMax = IgnoreMask;
-
-    StartX = StartX | IgnoreMaskMin;
-    StartY = StartY | IgnoreMaskMin;
-    EndX = EndX & IgnoreMaskMax;
-    EndY = EndY & IgnoreMaskMax;
-
-    // NOTE: Compute horizontal min/maxes
-    Result.StartX = HorizontalMin(StartX);
-    Result.StartY = HorizontalMin(StartY);
-    Result.EndX = HorizontalMax(EndX);
-    Result.EndY = HorizontalMax(EndY);
+    v2 ReMappedMin = (Min - Grid->WorldBounds.Min) / AabbGetDim(Grid->WorldBounds);
+    v2 ReMappedMax = (Max - Grid->WorldBounds.Min) / AabbGetDim(Grid->WorldBounds);
     
+    Result.StartX = Clamp((u32)FloorI32(ReMappedMin.x * Grid->NumCellsX), 0u, Grid->NumCellsX);
+    Result.StartY = Clamp((u32)FloorI32(ReMappedMin.y * Grid->NumCellsY), 0u, Grid->NumCellsY);
+    Result.EndX = Clamp((u32)FloorI32(ReMappedMax.x * Grid->NumCellsX), 0u, Grid->NumCellsX);
+    Result.EndY = Clamp((u32)FloorI32(ReMappedMax.y * Grid->NumCellsY), 0u, Grid->NumCellsY);
+
     return Result;
 }
 
@@ -147,57 +88,6 @@ inline void GridClear(grid* Grid)
         Cell->NumIndices = 0;
         ArenaClear(&Cell->IndexArena);
     }
-}
-
-inline bird_average_data GridGetAverageData(grid* Grid, bird_array BirdArray, v2_x4 BirdPosition, v1u_x4 CurrBirdId, v1u_x4 ValidMask)
-{
-    bird_average_data Result = {};
-
-    v1_x4 BirdRadiusSq = V1X4(DemoState->BirdRadiusSq);
-    v1_x4 AvoidRadiusSq = V1X4(DemoState->AvoidRadiusSq);
-    grid_range Range = GridGetRange(Grid, BirdPosition, V1X4(Max(DemoState->BirdRadiusSq, DemoState->AvoidRadiusSq)), ValidMask);
-    for (u32 GridY = Range.StartY; GridY <= Range.EndY; ++GridY)
-    {
-        for (u32 GridX = Range.StartX; GridX <= Range.EndX; ++GridX)
-        {
-            grid_cell* CurrCell = Grid->Cells + GridY * Grid->NumCellsX + GridX;
-
-            // NOTE: Loop over all birds in the grid
-            u32 GlobalIndexId = 0;
-            for (block* CurrBlock = CurrCell->IndexArena.Next; CurrBlock; CurrBlock = CurrBlock->Next)
-            {
-                u32* BlockIndices = BlockGetData(CurrBlock, u32);
-                u32 NumIndicesInBlock = Min(CurrCell->NumIndices - GlobalIndexId, Grid->MaxNumIndicesPerBlock);
-                for (u32 IndexId = 0; IndexId < NumIndicesInBlock; ++IndexId, ++GlobalIndexId)
-                {
-                    u32 NearbyBirdId = BlockIndices[IndexId];
-                    v1u_x4 SameBirdMask = V1UX4(NearbyBirdId) != CurrBirdId;
-                        
-                    v2_x4 NearbyBirdPos = V2X4(BirdArray.PosX[NearbyBirdId], BirdArray.PosY[NearbyBirdId]);
-                    v2_x4 DistanceVec = NearbyBirdPos - BirdPosition;
-                    v1_x4 DistanceSq = LengthSquared(DistanceVec);
-
-                    // TODO: Add a proper FOV
-                    v1u_x4 BirdRadiusMask = SameBirdMask & V1UX4Cast(DistanceSq < BirdRadiusSq) & V1UX4(0x1);
-                    v1_x4 BirdRadiusMaskFloat = V1X4(BirdRadiusMask);
-                    Result.NumBirdsInRadius += BirdRadiusMask;
-                                
-                    // NOTE: Velocity Matching
-                    Result.AvgFlockDir += BirdRadiusMaskFloat * V2X4(BirdArray.VelX[NearbyBirdId], BirdArray.VelY[NearbyBirdId]);
-
-                    // NOTE: Bird Flocking
-                    Result.AvgFlockPos += BirdRadiusMaskFloat * NearbyBirdPos;
-
-                    // NOTE: Avoidance
-                    v1u_x4 AvoidRadiusMask = SameBirdMask & V1UX4Cast(DistanceSq < AvoidRadiusSq) & V1UX4(0x1);
-                    v1_x4 AvoidRadiusMaskFloat = V1X4(AvoidRadiusMask);
-                    Result.AvgFlockAvoidance += AvoidRadiusMaskFloat * (-DistanceVec);
-                }
-            }
-        }
-    }
-    
-    return Result;
 }
 
 //
@@ -230,7 +120,7 @@ inline u32 SceneMeshAdd(render_scene* Scene, vk_image Color, vk_image Normal, pr
     return Result;
 }
 
-inline void SceneOpaqueInstanceAdd(render_scene* Scene, u32 MeshId, m4 WTransform, v4 Color)
+inline void SceneOpaqueInstanceAdd(render_scene* Scene, u32 MeshId, m4 WTransform)
 {
     Assert(Scene->NumOpaqueInstances < Scene->MaxNumOpaqueInstances);
 
@@ -238,7 +128,6 @@ inline void SceneOpaqueInstanceAdd(render_scene* Scene, u32 MeshId, m4 WTransfor
     Instance->MeshId = MeshId;
     Instance->WVTransform = CameraGetV(&Scene->Camera)*WTransform;
     Instance->WVPTransform = CameraGetP(&Scene->Camera)*Instance->WVTransform;
-    Instance->Color = Color;
 }
 
 inline void ScenePointLightAdd(render_scene* Scene, v3 Pos, v3 Color, f32 MaxDistance)
@@ -301,9 +190,9 @@ DEMO_INIT(Init)
     {
         {
             const char* DeviceExtensions[] =
-                {
-                    "VK_EXT_shader_viewport_index_layer",
-                };
+            {
+                "VK_EXT_shader_viewport_index_layer",
+            };
             
             render_init_params InitParams = {};
             InitParams.ValidationEnabled = false;
@@ -454,48 +343,38 @@ DEMO_INIT(Init)
     
     // NOTE: Init Boids
     {
-        DemoState->MinSpeed = 1.088f;
-        DemoState->MaxSpeed = 1.55f;
+        DemoState->MinSpeed = 0.5f;
+        DemoState->MaxSpeed = 2.2f;
 
-        DemoState->BirdRadiusSq = 0.138f;
-        DemoState->AvoidRadiusSq=  0.02598f;
-        DemoState->TerrainAvoidRadius = 0.25292f;
+        DemoState->BirdRadiusSq = Square(0.224f);
+        DemoState->AvoidRadiusSq=  Square(0.1418f);
+        DemoState->TerrainAvoidRadius = 0.42;
 
-        DemoState->TerrainRadius = 10.5f; //10.55f;
-        DemoState->PlatformBlockArena = PlatformBlockArenaCreate(KiloBytes(256), 64);
+        DemoState->TerrainRadius = 10.55f;
+        DemoState->PlatformBlockArena = PlatformBlockArenaCreate(KiloBytes(64), 64);
         u32 CellCountForAxis = 64;
         f32 CellSize = DemoState->TerrainRadius * 2.0f / f32(CellCountForAxis);
         DemoState->Grid = GridCreate(&DemoState->Arena, &DemoState->PlatformBlockArena, AabbCenterRadius(V2(0), V2(DemoState->TerrainRadius)),
                                      CellCountForAxis, CellCountForAxis);
         
         DemoState->AvoidTerrainWeight = 0.14117f;
-        DemoState->AvoidBirdWeight = 0.07352f;
+        DemoState->AvoidBirdWeight = 0.17941f;
         DemoState->AlignFlockWeight = 0.09117f;
         DemoState->MoveToFlockWeight = 0.22352f;
                 
         DemoState->BirdRadius = V3(0.05f);
-        DemoState->NumBirds = 10000;
-        u32 PaddedNumBirds = DemoState->NumBirds + 4;
-        DemoState->CurrBirds.PosX = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->CurrBirds.PosY = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->CurrBirds.VelX = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->CurrBirds.VelY = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->PrevBirds.PosX = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->PrevBirds.PosY = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->PrevBirds.VelX = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        DemoState->PrevBirds.VelY = PushArray(&DemoState->Arena, f32, PaddedNumBirds);
-        
+        DemoState->NumBirds = 40000;
+        DemoState->CurrBirds = PushArray(&DemoState->Arena, bird, DemoState->NumBirds);
+        DemoState->PrevBirds = PushArray(&DemoState->Arena, bird, DemoState->NumBirds);
+
         for (u32 BirdId = 0; BirdId < DemoState->NumBirds; ++BirdId)
         {
-            f32 RandVel = Lerp(DemoState->MinSpeed, DemoState->MaxSpeed, RandFloat());
-            v2 Pos = 2.0f * V2(RandFloat(), RandFloat()) - V2(1);
-            Pos *= 0.9f * DemoState->TerrainRadius;
-            v2 Vel = 0.5f * RandVel * Normalize(2.0f * V2(RandFloat(), RandFloat()) - V2(1));
+            bird* CurrBird = DemoState->PrevBirds + BirdId;
 
-            DemoState->PrevBirds.PosX[BirdId] = Pos.x;
-            DemoState->PrevBirds.PosY[BirdId] = Pos.y;
-            DemoState->PrevBirds.VelX[BirdId] = Vel.x;
-            DemoState->PrevBirds.VelY[BirdId] = Vel.y;
+            f32 RandVel = Lerp(DemoState->MinSpeed, DemoState->MaxSpeed, RandFloat());
+            CurrBird->Position = 2.0f * V2(RandFloat(), RandFloat()) - V2(1);
+            CurrBird->Position *= 0.9f * DemoState->TerrainRadius;
+            CurrBird->Velocity = 0.5f * RandVel * Normalize(2.0f * V2(RandFloat(), RandFloat()) - V2(1));
         }
     }
     
@@ -701,20 +580,7 @@ DEMO_MAIN_LOOP(MainLoop)
             {
                 CameraUpdate(&Scene->Camera, CurrInput, PrevInput);
             }
-
-#if 0
-            // TODO: REMOVE
-            local_global u32 TestFrameId = 0;
-            char Text[256];
-            snprintf(Text, sizeof(Text), "TEST FRAME: %i\n", TestFrameId);
-            OutputDebugStringA(Text);
-            TestFrameId += 1;
-            if (TestFrameId == 299)
-            {
-                int i = 0;
-            }
-#endif
-            
+                
             // NOTE: Populate scene
             {
                 // NOTE: Add Instances
@@ -725,12 +591,12 @@ DEMO_MAIN_LOOP(MainLoop)
                     temp_mem TempMem = BeginTempMem(&DemoState->TempArena);
                 
                     // NOTE: Terrain
-                    SceneOpaqueInstanceAdd(Scene, DemoState->Quad, M4Pos(V3(0.0f, 0.0f, 0.0f)) * M4Scale(V3(2.0f*DemoState->TerrainRadius)), V4(0.7f, 0.4f, 0.4f, 1.0f));
+                    SceneOpaqueInstanceAdd(Scene, DemoState->Quad, M4Pos(V3(0.0f, 0.0f, 0.0f)) * M4Scale(V3(2.0f*DemoState->TerrainRadius)));
 
                     local_global b32 EvenFrame = true;
 
-                    bird_array PrevBirdArray = EvenFrame ? DemoState->PrevBirds : DemoState->CurrBirds;
-                    bird_array CurrBirdArray = EvenFrame ? DemoState->CurrBirds : DemoState->PrevBirds;
+                    bird* PrevBirdArray = EvenFrame ? DemoState->PrevBirds : DemoState->CurrBirds;
+                    bird* CurrBirdArray = EvenFrame ? DemoState->CurrBirds : DemoState->PrevBirds;
                     EvenFrame = !EvenFrame;
                 
                     // NOTE: Add all birds to grid data structure
@@ -739,149 +605,190 @@ DEMO_MAIN_LOOP(MainLoop)
                         CPU_TIMED_BLOCK("Generate Grid");
                         for (u32 BirdId = 0; BirdId < DemoState->NumBirds; ++BirdId)
                         {
-                            v2 Pos = V2(PrevBirdArray.PosX[BirdId], PrevBirdArray.PosY[BirdId]);
-                            BirdGridIds[BirdId] = GridAddEntity(&DemoState->Grid, Pos, BirdId);
+                            bird* CurrBird = PrevBirdArray + BirdId;
+                            BirdGridIds[BirdId] = GridAddEntity(&DemoState->Grid, CurrBird->Position, BirdId);
                         }
                     }
                 
                     // NOTE: Update birds
                     {
                         CPU_TIMED_BLOCK("Update Birds");
-
-                        // NOTE: Loop over all grids and all entities in the grids
-                        v1_x4 TerrainAvoidRadius = V1X4(DemoState->TerrainAvoidRadius);
-                        v1_x4 TerrainRadius = V1X4(DemoState->TerrainRadius);
-                        u32 GlobalIndexId = 0;
-                        for (u32 GridY = 0; GridY < Grid->NumCellsY; ++GridY)
+                    
+                        for (u32 BirdId = 0; BirdId < DemoState->NumBirds; ++BirdId)
                         {
-                            for (u32 GridX = 0; GridX < Grid->NumCellsX; ++GridX)
+                            bird CurrBird = PrevBirdArray[BirdId];
+                    
+                            v2 NewBirdPosition = CurrBird.Position;
+                            v2 NewBirdVelocity = CurrBird.Velocity;
+
+                            u32 NumBirdsInRadius = 0;
+                            v2 AvgFlockDir = {};
+                            v2 AvgFlockPos = {};
+                            v2 AvgFlockAvoidance = {};
+
                             {
-                                grid_cell* CurrCell = Grid->Cells + GridY * Grid->NumCellsX + GridX;
-
-                                u32 BirdBlockIndexId = 0;
-                                for (block* CurrBlock = CurrCell->IndexArena.Next; CurrBlock; CurrBlock = CurrBlock->Next)
+                                CPU_TIMED_BLOCK("Generate avg data");
+                                grid_range Range = GridGetRange(&DemoState->Grid, NewBirdPosition, Max(DemoState->BirdRadiusSq, DemoState->AvoidRadiusSq));
+                                for (i32 GridY = Range.StartY; GridY <= Range.EndY; ++GridY)
                                 {
-                                    u32* BlockIndices = BlockGetData(CurrBlock, u32);
-                                    u32 NumIndicesInBlock = Min(CurrCell->NumIndices - BirdBlockIndexId, Grid->MaxNumIndicesPerBlock);
-                                    for (u32 IndexId = 0; IndexId < NumIndicesInBlock; IndexId += 4)
+                                    for (i32 GridX = Range.StartX; GridX <= Range.EndX; ++GridX)
                                     {
-                                        v1u_x4 CurrBirdId = V1UX4LoadUnAligned(BlockIndices + IndexId);
-                                        u32 FirstBirdId = CurrBirdId.e[0];
+                                        grid_cell* CurrCell = Grid->Cells + GridY * Grid->NumCellsX + GridX;
 
-                                        // TODO: Add scalar comparison ops
-                                        // NOTE: Check if we can do a load or if we have to gather
-                                        v1u_x4 BirdValidMask = (V1UX4(IndexId) + V1UX4(0, 1, 2, 3)) < V1UX4(NumIndicesInBlock);
-                                        v1u_x4 AlignedMask = {};
-                                        {
-                                            v1u_x4 FirstBirdVec = V1UX4(FirstBirdId);
-                                            AlignedMask = (CurrBirdId - FirstBirdVec) == V1UX4(1);
-                                        }
+                                        // NOTE: This will only help for larger avoid/boid radii
+#if 0
+                                        v2 CellDim = AabbGetDim(Grid->WorldBounds) / V2(Grid->NumCellsX, Grid->NumCellsY);
+                                        v2 CellMin = Grid->WorldBounds.Min + V2(GridX, GridY) * CellDim;
+                                        v2 CellMax = CellMin + CellDim;
 
-                                        // NOTE: Load bird data
-                                        v2_x4 NewBirdPosition = {};
-                                        v2_x4 NewBirdVelocity = {};
+                                        v2 MaxCellDistanceVec = Max(Abs(CellMin - NewBirdPosition), Abs(CellMax - NewBirdPosition));
+                                        f32 MaxCellDistance = LengthSquared(MaxCellDistanceVec);
+
+                                        if (MaxCellDistance < DemoState->BirdRadiusSq && MaxCellDistance < DemoState->AvoidRadiusSq)
                                         {
-                                            if (MoveMask(BirdValidMask) == 0xF && MoveMask(AlignedMask) == 0xF)
+                                            // NOTE: Fast path, we don't have to compute distances for each bird
+                                            u32 GlobalIndexId = 0;
+                                            for (block* CurrBlock = CurrCell->IndexArena.Next; CurrBlock; CurrBlock = CurrBlock->Next)
                                             {
-                                                // NOTE: We can do aligned loads here
-                                                NewBirdPosition = V2X4LoadUnAligned(PrevBirdArray.PosX + FirstBirdId, PrevBirdArray.PosY + FirstBirdId);
-                                                NewBirdVelocity = V2X4LoadUnAligned(PrevBirdArray.VelX + FirstBirdId, PrevBirdArray.VelY + FirstBirdId);
-                                            }
-                                            else
-                                            {
-                                                // NOTE: We have to do a masked gather here
-                                                NewBirdPosition = V2X4Gather(PrevBirdArray.PosX, PrevBirdArray.PosY, CurrBirdId, BirdValidMask);
-                                                NewBirdVelocity = V2X4Gather(PrevBirdArray.VelX, PrevBirdArray.VelY, CurrBirdId, BirdValidMask);
+                                                u32* BlockIndices = BlockGetData(CurrBlock, u32);
+                                                u32 NumIndicesInBlock = Min(CurrCell->NumIndices - GlobalIndexId, Grid->MaxNumIndicesPerBlock);
+                                                for (u32 IndexId = 0; IndexId < NumIndicesInBlock; ++IndexId, ++GlobalIndexId)
+                                                {
+                                                    u32 NearbyBirdId = BlockIndices[IndexId];
+                                    
+                                                    if (NearbyBirdId != BirdId)
+                                                    {
+                                                        bird* NearbyBird = PrevBirdArray + NearbyBirdId;
+                                                        v2 DistanceVec = NearbyBird->Position - NewBirdPosition;
+
+                                                        // TODO: Add a proper FOV
+                                                        NumBirdsInRadius += 1;
+                                
+                                                        // NOTE: Velocity Matching
+                                                        AvgFlockDir += NearbyBird->Velocity;
+                                                        // NOTE: Bird Flocking
+                                                        AvgFlockPos += NearbyBird->Position;
+                                                        // NOTE: Avoidance
+                                                        AvgFlockAvoidance += -DistanceVec;
+                                                    }
+                                                }
                                             }
                                         }
-                                                                                
-                                        bird_average_data AverageData = GridGetAverageData(Grid, PrevBirdArray, NewBirdPosition,
-                                                                                           CurrBirdId, BirdValidMask);
+                                        else
+#endif
                                         
-                                        // NOTE: Apply rules
                                         {
-                                            CPU_TIMED_BLOCK("Apply Rules");
-                                            
-                                            // NOTE: Only the flock pos has to be averaged
+                                            // NOTE: Loop over all birds in the grid
+                                            u32 GlobalIndexId = 0;
+                                            for (block* CurrBlock = CurrCell->IndexArena.Next; CurrBlock; CurrBlock = CurrBlock->Next)
                                             {
-                                                v1_x4 DivideFactor = V1X4(Max(V1UX4(1), AverageData.NumBirdsInRadius));
-                                                AverageData.AvgFlockDir /= DivideFactor;
-                                                AverageData.AvgFlockPos /= DivideFactor;
+                                                u32* BlockIndices = BlockGetData(CurrBlock, u32);
+                                                u32 NumIndicesInBlock = Min(CurrCell->NumIndices - GlobalIndexId, Grid->MaxNumIndicesPerBlock);
+                                                for (u32 IndexId = 0; IndexId < NumIndicesInBlock; ++IndexId, ++GlobalIndexId)
+                                                {
+                                                    u32 NearbyBirdId = BlockIndices[IndexId];
+                                    
+                                                    if (NearbyBirdId != BirdId)
+                                                    {
+                                                        bird* NearbyBird = PrevBirdArray + NearbyBirdId;
+                                                        v2 DistanceVec = NearbyBird->Position - NewBirdPosition;
+                                                        f32 DistanceSq = LengthSquared(DistanceVec);
+
+                                                        // TODO: Add a proper FOV
+                                                        if (DistanceSq < DemoState->BirdRadiusSq)
+                                                        {
+                                                            NumBirdsInRadius += 1;
+                                
+                                                            // NOTE: Velocity Matching
+                                                            AvgFlockDir += NearbyBird->Velocity;
+
+                                                            // NOTE: Bird Flocking
+                                                            AvgFlockPos += NearbyBird->Position;
+                                                        }
+                                                        if (DistanceSq < DemoState->AvoidRadiusSq)
+                                                        {
+                                                            // NOTE: Avoidance
+                                                            AvgFlockAvoidance += -DistanceVec;
+                                                        }
+                                                    }
+                                                }
                                             }
-                    
-                                            // NOTE: Avoid Wall Vel
-                                            // IMPORTANT: DOnt add float type to the 1 and 0 or MSVC barfs
-                                            v2_x4 AvoidWallDir = {};
-                                            AvoidWallDir.x += (NewBirdPosition.x - TerrainAvoidRadius <= -TerrainRadius) & V1X4(0x1);
-                                            AvoidWallDir.x -= (NewBirdPosition.x + TerrainAvoidRadius >= TerrainRadius) & V1X4(0x1);
-                                            AvoidWallDir.y += (NewBirdPosition.y - TerrainAvoidRadius <= -TerrainRadius) & V1X4(0x1);
-                                            AvoidWallDir.y -= (NewBirdPosition.y + TerrainAvoidRadius >= TerrainRadius) & V1X4(0x1);
-
-                                            // NOTE: Fly towards center
-                                            {
-                                                v1_x4 Mask = V1X4(AverageData.NumBirdsInRadius > V1UX4(0)) & V1X4(0x1);
-                                                NewBirdVelocity += Mask * DemoState->MoveToFlockWeight * (AverageData.AvgFlockPos - NewBirdPosition);
-                                            }
-                                            
-                                            // NOTE: Avoid Others
-                                            NewBirdVelocity += DemoState->AvoidBirdWeight * AverageData.AvgFlockAvoidance;
-
-                                            // NOTE: Align Velocities
-                                            {
-                                                v1_x4 Mask = V1X4(AverageData.NumBirdsInRadius > V1UX4(0)) & V1X4(0x1);
-                                                NewBirdVelocity += Mask * DemoState->AlignFlockWeight * (AverageData.AvgFlockDir - NewBirdVelocity);
-                                            }
-                        
-                                            // NOTE: Clamp Velocity
-                                            v1_x4 BirdSpeed = Clamp(Length(NewBirdVelocity), V1X4(DemoState->MinSpeed), V1X4(DemoState->MaxSpeed));
-                                            NewBirdVelocity = BirdSpeed * Normalize(NewBirdVelocity);
-
-                                            // NOTE: Avoid Terrain
-                                            NewBirdVelocity += DemoState->AvoidTerrainWeight * AvoidWallDir;
-                    
-                                            NewBirdPosition += NewBirdVelocity * ModifiedFrameTime;
-
-                                            // NOTE: Clamp to be in bounds (a bit hacky since sometimes they can escape)
-                                            NewBirdPosition = Clamp(NewBirdPosition, V2X4(-TerrainRadius + 0.01f), V2X4(TerrainRadius - 0.01f));
-                                            
-                                            // NOTE: Write into next bird array (we do unaligned store since sometimes we store <4
-                                            // elements and then next write won't be aligned)
-
-                                            if (GlobalIndexId >= 2990)
-                                            {
-                                                int i = 0;
-                                            }
-                                            
-                                            StoreUnAligned(NewBirdVelocity.x, CurrBirdArray.VelX + GlobalIndexId + IndexId);
-                                            StoreUnAligned(NewBirdVelocity.y, CurrBirdArray.VelY + GlobalIndexId + IndexId);
-                                            StoreUnAligned(NewBirdPosition.x, CurrBirdArray.PosX + GlobalIndexId + IndexId);
-                                            StoreUnAligned(NewBirdPosition.y, CurrBirdArray.PosY + GlobalIndexId + IndexId);
                                         }
+                                    
                                     }
-
-                                    BirdBlockIndexId += NumIndicesInBlock;
-                                    GlobalIndexId += NumIndicesInBlock;
                                 }
+                            }
+                    
+                            // NOTE: Only the flock pos has to be averaged
+                            if (NumBirdsInRadius)
+                            {
+                                AvgFlockDir /= f32(NumBirdsInRadius);
+                                AvgFlockPos /= f32(NumBirdsInRadius);
+                            }
+                    
+                            // NOTE: Avoid Wall Vel
+                            v2 AvoidWallDir = {};
+                            {
+                                if (NewBirdPosition.x - DemoState->TerrainAvoidRadius <= -DemoState->TerrainRadius)
+                                {
+                                    AvoidWallDir.x = 1.0f;
+                                }
+                                if (NewBirdPosition.x + DemoState->TerrainAvoidRadius >= DemoState->TerrainRadius)
+                                {
+                                    AvoidWallDir.x = -1.0f;
+                                }
+                                if (NewBirdPosition.y - DemoState->TerrainAvoidRadius <= -DemoState->TerrainRadius)
+                                {
+                                    AvoidWallDir.y = 1.0f;
+                                }
+                                if (NewBirdPosition.y + DemoState->TerrainAvoidRadius >= DemoState->TerrainRadius)
+                                {
+                                    AvoidWallDir.y = -1.0f;
+                                }
+                            }
+                    
+                            // NOTE: Apply rules
+                            {
+                                //CPU_TIMED_BLOCK("Apply Rules and Gen Opaque");
+                            
+                                {
+                                    // NOTE: Fly towards center
+                                    if (NumBirdsInRadius > 0)
+                                    {
+                                        NewBirdVelocity += DemoState->MoveToFlockWeight * (AvgFlockPos - NewBirdPosition);
+                                    }
+                        
+                                    // NOTE: Avoid Others
+                                    NewBirdVelocity += DemoState->AvoidBirdWeight * AvgFlockAvoidance;
+
+                                    // NOTE: Align Velocities
+                                    if (NumBirdsInRadius > 0)
+                                    {
+                                        NewBirdVelocity += DemoState->AlignFlockWeight * (AvgFlockDir - NewBirdVelocity);
+                                    }
+                        
+                                    // NOTE: Clamp Velocity
+                                    f32 BirdSpeed = Clamp(Length(NewBirdVelocity), DemoState->MinSpeed, DemoState->MaxSpeed);
+                                    NewBirdVelocity = BirdSpeed * Normalize(NewBirdVelocity);
+
+                                    // NOTE: Avoid Terrain
+                                    NewBirdVelocity += DemoState->AvoidTerrainWeight * AvoidWallDir;
+                                }
+                    
+                                NewBirdPosition += NewBirdVelocity * ModifiedFrameTime;
+
+                                // NOTE: Write into next bird array
+                                CurrBirdArray[BirdId].Velocity = NewBirdVelocity;
+                                CurrBirdArray[BirdId].Position = NewBirdPosition;
+
+                                m4 Transform = M4Pos(V3(NewBirdPosition, 0)) * M4Scale(V3(0.05f));
+                                SceneOpaqueInstanceAdd(Scene, DemoState->Cube, Transform);
                             }
                         }
                     }
                 
                     EndTempMem(TempMem);
 
-                    // NOTE: Generate rendering instances
-                    {
-                        CPU_TIMED_BLOCK("Gen Render Instances");
-                        
-                        for (u32 BirdId = 0; BirdId < DemoState->NumBirds; ++BirdId)
-                        {
-                            v2 Position = V2(CurrBirdArray.PosX[BirdId], CurrBirdArray.PosY[BirdId]);
-                            v2 Velocity = V2(CurrBirdArray.VelX[BirdId], CurrBirdArray.VelY[BirdId]);
-                            f32 Angle = atan2(Velocity.y, Velocity.x);
-                            m4 Transform = M4Pos(V3(Position, 0)) * M4Rotation(0, 0, Angle) * M4Scale(V3(0.05f));
-                            SceneOpaqueInstanceAdd(Scene, DemoState->Cube, Transform, V4(0.4f, 0.3f, 0.6f, 1.0f));
-                        }
-                    }
-                    
                     // NOTE: Clear the grid
                     {
                         CPU_TIMED_BLOCK("Clear Grid");
@@ -899,7 +806,6 @@ DEMO_MAIN_LOOP(MainLoop)
                     {
                         GpuData[InstanceId].WVTransform = Scene->OpaqueInstances[InstanceId].WVTransform;
                         GpuData[InstanceId].WVPTransform = Scene->OpaqueInstances[InstanceId].WVPTransform;
-                        GpuData[InstanceId].Color = Scene->OpaqueInstances[InstanceId].Color;
                     }
                 }
             
@@ -1054,5 +960,6 @@ DEMO_MAIN_LOOP(MainLoop)
     }
 
     ProfilerProcessData();
+    // TODO: FIX BUG
     ProfilerPrintTimeStamps();
 }

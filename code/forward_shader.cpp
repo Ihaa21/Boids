@@ -18,6 +18,7 @@ layout(location = 2) in vec2 InUv;
 layout(location = 0) out vec3 OutViewPos;
 layout(location = 1) out vec3 OutViewNormal;
 layout(location = 2) out vec2 OutUv;
+layout(location = 3) out flat uint OutInstanceId;
 
 void main()
 {
@@ -27,6 +28,7 @@ void main()
     OutViewPos = (Entry.WVTransform * vec4(InPos, 1)).xyz;
     OutViewNormal = (Entry.WVTransform * vec4(InNormal, 0)).xyz;
     OutUv = InUv;
+    OutInstanceId = gl_InstanceIndex;
 }
 
 #endif
@@ -36,23 +38,23 @@ void main()
 layout(location = 0) in vec3 InViewPos;
 layout(location = 1) in vec3 InViewNormal;
 layout(location = 2) in vec2 InUv;
+layout(location = 3) in flat uint InInstanceId;
 
 layout(location = 0) out vec4 OutColor;
 
 void main()
 {
     vec3 CameraPos = vec3(0, 0, 0);
-    
-    // TODO: Support alpha
-    vec4 TexelColor = vec4(1); //texture(ColorTexture, InUv);
-    
     vec3 SurfacePos = InViewPos;
     // TODO: Add normal mapping
     vec3 SurfaceNormal = normalize(InViewNormal);
-    vec3 SurfaceColor = TexelColor.rgb;
+    vec3 SurfaceColor = InstanceBuffer[InInstanceId].Color.rgb;
     vec3 View = normalize(CameraPos - SurfacePos);
     vec3 Color = vec3(0);
 
+    Color = SurfaceColor;
+
+#if 0
     // NOTE: Calculate lighting for point lights
     for (int i = 0; i < SceneBuffer.NumPointLights; ++i)
     {
@@ -66,7 +68,8 @@ void main()
         Color += BlinnPhongLighting(View, SurfaceColor, SurfaceNormal, 32, DirectionalLight.Dir, DirectionalLight.Color);
         Color += DirectionalLight.AmbientLight * SurfaceColor;
     }
-
+#endif
+    
     OutColor = vec4(Color, 1);
 }
 

@@ -1,12 +1,12 @@
 #pragma once
 
-#define VALIDATION 1
+//#define VALIDATION 1
 
 #include "framework_vulkan\framework_vulkan.h"
 
-#define CPU_PROFILING
 #define WIN32_PROFILING
-#define X86_PROFILING
+//#define CPU_PROFILING
+//#define X86_PROFILING
 #include "profiling\profiling.h"
 
 //
@@ -15,10 +15,10 @@
 
 struct grid_range
 {
-    i32 StartX;
-    i32 StartY;
-    i32 EndX;
-    i32 EndY;
+    u32 StartX;
+    u32 StartY;
+    u32 EndX;
+    u32 EndY;
 };
 
 struct grid_cell
@@ -36,11 +36,21 @@ struct grid
     grid_cell* Cells;
 };
 
-struct bird
+struct bird_array
 {
     // TODO: Handle multiple grid cells for one entity
-    v2 Position;
-    v2 Velocity;
+    f32* PosX;
+    f32* PosY;
+    f32* VelX;
+    f32* VelY;
+};
+
+struct bird_average_data
+{
+    v1u_x4 NumBirdsInRadius;
+    v2_x4 AvgFlockDir;
+    v2_x4 AvgFlockPos;
+    v2_x4 AvgFlockAvoidance;
 };
 
 //
@@ -76,12 +86,14 @@ struct instance_entry
     u32 MeshId;
     m4 WVTransform;
     m4 WVPTransform;
+    v4 Color;
 };
 
 struct gpu_instance_entry
 {
     m4 WVTransform;
     m4 WVPTransform;
+    v4 Color;
 };
 
 struct render_mesh
@@ -170,8 +182,8 @@ struct demo_state
     // NOTE: Bird Data
     v3 BirdRadius;
     u32 NumBirds;
-    bird* CurrBirds;
-    bird* PrevBirds;
+    bird_array CurrBirds;
+    bird_array PrevBirds;
 
     grid Grid;
 };
